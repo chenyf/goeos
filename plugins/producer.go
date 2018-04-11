@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"fmt"
 	"net/http"
 )
 
@@ -12,6 +13,7 @@ func (this *ProducerPlugin) Init() {
 }
 
 func (this *ProducerPlugin) Startup() error {
+	fmt.Printf("producer plugin startup\n")
 	err := http.ListenAndServe(this.addr, nil)
 	return err
 }

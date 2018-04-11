@@ -20,7 +20,7 @@ type ChainConfig struct {
 	shared_memory_dir  string
 	shared_memory_size uint64
 	readonly           bool
-	genesis            GenesisStateType
+	genesis            *GenesisStateType
 	limits             struct {
 		max_push_block_us       uint32
 		max_push_transaction_us uint32
@@ -62,7 +62,10 @@ type ChainPlugin struct {
 
 func NewChainPlugin() *ChainPlugin {
 	return &ChainPlugin{
-		skip_flags: fc.SkipNothing,
+		skip_flags:         fc.SkipNothing,
+		loaded_checkpoints: map[uint32]fc.BlockIdType{},
+		chain_config:       &ChainConfig{},
+		chain:              &ChainController{},
 	}
 }
 
@@ -110,11 +113,12 @@ func (this *ChainPlugin) Init(options map[string]interface{}) {
 }
 
 func (this *ChainPlugin) Startup() error {
+	fmt.Printf("chain plugin startup\n")
 
 	this.chain_config.block_log_dir = this.block_log_dir
 	this.chain_config.shared_memory_dir = appbase.Instance().DataDir() + "/" + chain.DefaultSharedMemoryDir
 	this.chain_config.readonly = this.readonly
-	this.chain_config.genesis = *LoadGenesis(this.genesis_file)
+	this.chain_config.genesis = LoadGenesis(this.genesis_file)
 
 	if this.max_reversible_block_time_ms > 0 {
 		this.chain_config.limits.max_push_block_us = 0

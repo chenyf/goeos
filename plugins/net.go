@@ -125,6 +125,7 @@ func (this *NetPlugin) handleInit(conn *net.TCPConn) (*Peer, error) {
 }
 
 func (this *NetPlugin) Startup() error {
+	fmt.Printf("net plugin startup\n")
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", this.addr)
 	l, err := net.ListenTCP("tcp4", tcpAddr)
 	if err != nil {
