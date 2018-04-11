@@ -29,6 +29,7 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		<-c
+		app.Shutdown()
 		wg.Done()
 		fmt.Printf("nodeos quit\n")
 	}()

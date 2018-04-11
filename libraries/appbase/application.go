@@ -5,7 +5,7 @@ import ()
 type Application struct {
 	Version         uint64
 	plugins         map[string]Plugin
-	running_plugins []Plugin
+	running_plugins map[string]Plugin
 }
 
 var application *Application = nil
@@ -15,7 +15,7 @@ func Instance() *Application {
 		application = &Application{
 			Version:         0,
 			plugins:         map[string]Plugin{},
-			running_plugins: []Plugin{},
+			running_plugins: map[string]Plugin{},
 		}
 	}
 	return application
@@ -25,9 +25,14 @@ func (this *Application) RegisterPlugin(name string, plugin Plugin) {
 	this.plugins[name] = plugin
 }
 
+func (this *Application) PluginStarted(name string, plugin Plugin) {
+	this.running_plugins[name] = plugin
+}
+
 func (this *Application) Startup() {
-	for _, plugin := range this.plugins {
+	for name, plugin := range this.plugins {
 		plugin.Startup()
+		this.running_plugins[name] = plugin
 	}
 }
 

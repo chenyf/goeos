@@ -45,8 +45,15 @@ func (this *ChainController) head_block_num() int {
 func (this *ChainController) head_block_id() string {
 	return ""
 }
+func (this *ChainController) last_irreversible_block_num() uint32 {
+	return 0
+}
+func (this *ChainController) get_block_id_for_num(uint32) uint32 {
+	return 0
+}
 
 type ChainPlugin struct {
+	name                            string
 	addr                            string
 	genesis_file                    string
 	block_log_dir                   string
@@ -62,6 +69,7 @@ type ChainPlugin struct {
 
 func NewChainPlugin() *ChainPlugin {
 	return &ChainPlugin{
+		name:               "chain_plugin",
 		skip_flags:         fc.SkipNothing,
 		loaded_checkpoints: map[uint32]fc.BlockIdType{},
 		chain_config:       &ChainConfig{},
@@ -113,7 +121,7 @@ func (this *ChainPlugin) Init(options map[string]interface{}) {
 }
 
 func (this *ChainPlugin) Startup() error {
-	fmt.Printf("chain plugin startup\n")
+	fmt.Printf("%s startup\n", this.name)
 
 	this.chain_config.block_log_dir = this.block_log_dir
 	this.chain_config.shared_memory_dir = appbase.Instance().DataDir() + "/" + chain.DefaultSharedMemoryDir
@@ -139,11 +147,12 @@ func (this *ChainPlugin) Startup() error {
 }
 
 func (this *ChainPlugin) Shutdown() {
+	fmt.Printf("%s shutdown\n", this.name)
 	this.chain.Reset()
 }
 
 func (this *ChainPlugin) Name() string {
-	return "chain plugin"
+	return this.name
 }
 
 func (this *ChainPlugin) accept_block() bool {
