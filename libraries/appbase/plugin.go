@@ -1,5 +1,5 @@
 package appbase
 
-type Plugin struct {
-	Startup func() bool
+type Plugin interface {
+	Startup() bool
 }

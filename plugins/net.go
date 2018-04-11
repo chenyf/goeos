@@ -10,6 +10,10 @@ import (
 type MsgHandler func(*net.TCPConn, *Peer, *p2p.Header, []byte) int
 
 type NetPlugin struct {
+	node_id         string
+	chain_id        string
+	network_version string
+
 	addr               string
 	listener           *net.TCPListener
 	connection_num     uint32
@@ -46,8 +50,8 @@ func (this *NetPlugin) listenLoop() {
 }
 
 func (this *NetPlugin) startSession(conn *net.TCPConn) {
-	peer, err := this.handleInit(conn)
-	if err != nil {
+	peer, ret := HandleHandshake(this, conn)
+	if ret != 0 {
 		conn.Close()
 		return
 	}
@@ -107,7 +111,13 @@ func (this *NetPlugin) closePeer(peer *Peer) {
 }
 
 type Peer struct {
-	status uint32
+	status               uint32
+	syncing              bool
+	node_id              string
+	sent_handshake_count int
+}
+
+func (this *Peer) send_handshake() {
 }
 
 func (this *NetPlugin) handleInit(conn *net.TCPConn) (*Peer, error) {
@@ -136,4 +146,86 @@ func (this *NetPlugin) Shutdown() {
 
 func (this *NetPlugin) Name() string {
 	return "network plugin"
+}
+
+type HandshakeMsg struct {
+	generation      int
+	node_id         string
+	chain_id        string
+	head_id         string
+	network_version string
+	head_num        int
+}
+
+func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
+	var msg HandshakeMsg
+	var peer Peer
+	if msg.generation == 1 {
+		if msg.node_id == plugin.node_id {
+			return nil, 1
+		}
+
+		if msg.chain_id != plugin.chain_id {
+			return nil, 2
+		}
+
+		if msg.network_version != plugin.network_version {
+		}
+		if peer.node_id != msg.node_id {
+			peer.node_id = msg.node_id
+		}
+		if peer.sent_handshake_count == 0 {
+			peer.send_handshake()
+		}
+	}
+
+	peer.syncing = false
+	var cc ChainController
+	head_num := cc.head_block_num()
+	head_id := cc.head_block_id()
+	if head_id == msg.head_id {
+	}
+	if head_num < 0 {
+	}
+	if msg.head_num < 100 {
+	}
+	if head_num <= msg.head_num {
+		return nil, 0
+	}
+	if msg.generation > 1 {
+		/*var NoticeMsg note
+		peer.enqueue(note)*/
+	}
+	peer.syncing = true
+	return nil, 0
+}
+
+func HandleGoAway(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+
+func HandleTime(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+
+func HandleNotice(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+func HandleRequest(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+func HandleSyncRequest(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+func HandleSignedBlockSummary(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+func HandleSignedBlock(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+func HandlePackedTransaction(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
+}
+func HandleSignedTransaction(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+	return 0
 }

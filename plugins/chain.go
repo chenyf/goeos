@@ -39,6 +39,12 @@ func (this *ChainController) AddCheckpoints() {
 }
 func (this *ChainController) Emplace(config *ChainConfig) {
 }
+func (this *ChainController) head_block_num() int {
+	return 0
+}
+func (this *ChainController) head_block_id() string {
+	return ""
+}
 
 type ChainPlugin struct {
 	addr                            string
