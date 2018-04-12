@@ -45,6 +45,11 @@ func (this *ChainController) head_block_num() int {
 func (this *ChainController) head_block_id() string {
 	return ""
 }
+
+func (this *ChainController) is_known_block(blk_id uint32) bool {
+	return false
+}
+
 func (this *ChainController) last_irreversible_block_num() uint32 {
 	return 0
 }
@@ -155,11 +160,12 @@ func (this *ChainPlugin) Name() string {
 	return this.name
 }
 
-func (this *ChainPlugin) accept_block() bool {
+func (this *ChainPlugin) accept_block(sb *chain.SignedBlock, flag bool) bool {
 	return false
 }
 
-func (this *ChainPlugin) accept_transaction() {
+func (this *ChainPlugin) accept_transaction(trx *PackedTransactionMsg) bool {
+	return false
 }
 func (this *ChainPlugin) block_is_on_preferred_chain() bool {
 	return false

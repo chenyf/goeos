@@ -2,12 +2,13 @@ package plugins
 
 import (
 	"fmt"
+	"github.com/chenyf/goeos/libraries/chain"
 	"github.com/chenyf/goeos/p2p"
 	"io"
 	"net"
 )
 
-type MsgHandler func(*net.TCPConn, *Peer, *p2p.Header, []byte) int
+type MsgHandler func(*NetPlugin, *Peer, *p2p.Header, []byte) int
 
 type NetPlugin struct {
 	name                  string
@@ -24,7 +25,9 @@ type NetPlugin struct {
 
 	handlerMap map[uint8]MsgHandler
 
-	sync_master *SyncManager
+	chain_plugin   *ChainPlugin
+	sync_master    *SyncManager
+	big_msg_master *BigMsgManager
 }
 
 func NewNetPlugin() *NetPlugin {
@@ -33,7 +36,9 @@ func NewNetPlugin() *NetPlugin {
 		connection_num:     0,
 		max_connection_num: 100,
 		max_body_len:       20480,
+		chain_plugin:       nil,
 		sync_master:        &SyncManager{},
+		big_msg_master:     &BigMsgManager{},
 	}
 }
 
@@ -107,7 +112,7 @@ func (this *NetPlugin) startSession(conn *net.TCPConn) {
 		if !ok {
 			continue
 		}
-		handler(conn, peer, &header, dataBuf)
+		handler(this, peer, &header, dataBuf)
 	}
 	fmt.Printf("close connection, reason %d\n", close_code)
 	this.closePeer(peer)
@@ -129,13 +134,25 @@ type Peer struct {
 }
 
 func (this *Peer) send_handshake() {
+
 }
 func (this *Peer) flush_queues() {
 }
 func (this *Peer) get_time() uint64 {
 	return 0
 }
+
+func (this *Peer) cancel_wait() {
+}
+
+func (this *Peer) enqueue_sync_block() bool {
+	return false
+}
+
 func (this *Peer) Close() {
+}
+
+func (this *Peer) EnqueueMsg(msg interface{}) {
 }
 
 func (this *NetPlugin) handleInit(conn *net.TCPConn) (*Peer, error) {
@@ -188,25 +205,47 @@ type GoAwayMsg struct {
 	node_id string
 }
 
+func (this *NetPlugin) is_valid(msg *HandshakeMsg) bool {
+	if msg.last_irreversible_block_num > (uint32)(msg.head_num) {
+		return false
+	}
+
+	if msg.p2p_address == "" {
+		return false
+	}
+	if msg.os == "" {
+		return false
+	}
+	return true
+}
+
 func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
 	var cc ChainController
 	var msg HandshakeMsg
 	var peer Peer
+
+	if !plugin.is_valid(&msg) {
+		peer.EnqueueMsg(&GoAwayMsg{reason: "fatal other"})
+		return nil, 1
+	}
 
 	lib_num := cc.last_irreversible_block_num()
 	peer_lib := msg.last_irreversible_block_num
 
 	if msg.generation == 1 {
 		if msg.node_id == plugin.node_id {
+			peer.EnqueueMsg(&GoAwayMsg{reason: "self"})
 			return nil, 1
 		}
 
 		if msg.chain_id != plugin.chain_id {
+			peer.EnqueueMsg(&GoAwayMsg{reason: "wrong chain"})
 			return nil, 2
 		}
 
 		if msg.network_version != plugin.network_version {
 			if plugin.network_version_match {
+				peer.EnqueueMsg(&GoAwayMsg{reason: "wrong version"})
 				return nil, 3
 			}
 		}
@@ -214,6 +253,7 @@ func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
 			peer.node_id = msg.node_id
 		}
 		if !authenticate_peer(&msg) {
+			peer.EnqueueMsg(&GoAwayMsg{reason: "authentication"})
 			return nil, 4
 		}
 		on_fork := false
@@ -223,6 +263,7 @@ func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
 				on_fork = true
 			}
 			if on_fork {
+				peer.EnqueueMsg(&GoAwayMsg{reason: "forked"})
 				return nil, 4
 			}
 		}
@@ -236,7 +277,7 @@ func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
 	return nil, 0
 }
 
-func HandleGoAway(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+func HandleGoAway(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
 	var msg GoAwayMsg
 	reason := msg.reason
 	if reason == "duplicate" {
@@ -254,7 +295,7 @@ type TimeMsg struct {
 	dst uint64
 }
 
-func HandleTime(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+func HandleTime(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
 	var msg TimeMsg
 	msg.dst = peer.get_time()
 	if msg.xmt == 0 {
@@ -275,7 +316,7 @@ func HandleTime(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) 
 	return 0
 }
 
-func HandleNotice(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+func HandleNotice(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
 	return 0
 }
 
@@ -288,7 +329,7 @@ type RequestMsg struct {
 	}
 }
 
-func HandleRequest(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+func HandleRequest(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
 	var msg RequestMsg
 	switch msg.req_blocks.mode {
 	}
@@ -299,9 +340,11 @@ func HandleRequest(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byt
 }
 
 type SyncRequestMsg struct {
+	start_block uint32
+	end_block   uint32
 }
 
-func HandleSyncRequest(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+func HandleSyncRequest(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
 	var msg SyncRequestMsg
 	if msg.end_block == 0 {
 		peer.flush_queues()
@@ -310,21 +353,70 @@ func HandleSyncRequest(conn *net.TCPConn, peer *Peer, header *p2p.Header, body [
 	}
 	return 0
 }
-func HandleSignedBlockSummary(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+func HandleSignedBlockSummary(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
 	return 0
 }
-func HandleSignedBlock(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+
+type SignedBlockMsg struct {
+}
+
+func HandleSignedBlock(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
+	var msg chain.SignedBlock
+	var cc ChainController
+	//blk_id := msg.id()
+	//blk_num := msg.block_num()
+	var blk_id uint32 = 0
+	var blk_num uint32 = 0
+	peer.cancel_wait()
+
+	if cc.is_known_block(blk_id) {
+		net_plugin.sync_master.recv_block(peer, blk_id, blk_num, true)
+		return 0
+	}
+
+	reason := "fatal other"
+	ok := net_plugin.chain_plugin.accept_block(&msg, net_plugin.sync_master.is_active(peer))
+	if ok {
+		reason = "no reason"
+	}
+	if reason == "no reason" {
+		for _, region := range msg.Regions {
+			for _, cycle_sum := range region.CyclesSummary {
+				for _, shared := range cycle_sum {
+					for _, recpt := range shared.Transactions {
+						switch recpt.Status {
+						}
+					}
+				}
+			}
+		}
+	}
+	net_plugin.sync_master.recv_block(peer, blk_id, blk_num, reason == "no reason")
 	return 0
 }
-func HandlePackedTransaction(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
+
+type PackedTransactionMsg struct {
+}
+
+func HandlePackedTransaction(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
+	var msg PackedTransactionMsg
+	if net_plugin.sync_master.is_active(peer) {
+		return 1
+	}
+	peer.cancel_wait()
+	net_plugin.big_msg_master.recv_transaction(peer)
+	ok := net_plugin.chain_plugin.accept_transaction(&msg)
+	if !ok {
+		net_plugin.big_msg_master.bcast_rejected_transaction(&msg)
+	}
 	return 0
 }
 
 type SignedTransactionMsg struct {
 }
 
-func HandleSignedTransaction(conn *net.TCPConn, peer *Peer, header *p2p.Header, body []byte) int {
-	var msg SignedTransactionMsg
+func HandleSignedTransaction(net_plugin *NetPlugin, peer *Peer, header *p2p.Header, body []byte) int {
+	//var msg SignedTransactionMsg
 	peer.cancel_wait()
 	return 0
 }
@@ -354,6 +446,23 @@ func (this *SyncManager) recv_handshake(peer *Peer, msg *HandshakeMsg) {
 		peer.enqueue(note)*/
 	}
 	peer.syncing = true
+}
+
+func (this *SyncManager) is_active(peer *Peer) bool {
+	return false
+}
+
+func (this *SyncManager) recv_block(peer *Peer, id uint32, num uint32, flag bool) bool {
+	return false
+}
+
+type BigMsgManager struct {
+}
+
+func (this *BigMsgManager) recv_transaction(peer *Peer) {
+}
+
+func (this *BigMsgManager) bcast_rejected_transaction(msg *PackedTransactionMsg) {
 }
 
 func authenticate_peer(msg *HandshakeMsg) bool {
