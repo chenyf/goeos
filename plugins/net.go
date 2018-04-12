@@ -191,7 +191,7 @@ type HandshakeMsg struct {
 	chain_id        string
 	head_id         string
 	network_version int16
-	head_num        int
+	head_num        uint32
 	p2p_address     string
 	os              string
 	agent           string
@@ -229,8 +229,8 @@ func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
 		return nil, 1
 	}
 
-	lib_num := cc.last_irreversible_block_num()
-	peer_lib := msg.last_irreversible_block_num
+	my_lib_num := cc.last_irreversible_block_num()
+	peer_lib_num := msg.last_irreversible_block_num
 
 	if msg.generation == 1 {
 		if msg.node_id == plugin.node_id {
@@ -257,9 +257,9 @@ func HandleHandshake(plugin *NetPlugin, conn *net.TCPConn) (*Peer, int) {
 			return nil, 4
 		}
 		on_fork := false
-		if peer_lib <= lib_num && peer_lib > 0 {
-			peer_lib_id := cc.get_block_id_for_num(peer_lib)
-			if msg.last_irreversible_block_id != peer_lib_id {
+		if peer_lib_num <= my_lib_num && peer_lib_num > 0 {
+			peer_lib_num_id := cc.get_block_id_for_num(peer_lib_num)
+			if msg.last_irreversible_block_id != peer_lib_num_id {
 				on_fork = true
 			}
 			if on_fork {
@@ -424,28 +424,55 @@ func HandleSignedTransaction(net_plugin *NetPlugin, peer *Peer, header *p2p.Head
 type SyncManager struct {
 }
 
+type NoticeMsg struct {
+}
+
 func (this *SyncManager) recv_handshake(peer *Peer, msg *HandshakeMsg) {
+	//--------------------------------
+	// sync need checkz; (lib == last irreversible block)
+	//
+	// 0. my head block id == peer head id means we are all caugnt up block wise
+	// 1. my head block num < peer lib - start sync locally
+	// 2. my lib > peer head num - send an last_irr_catch_up notice if not the first generation
+	//
+	// 3  my head block num <= peer head block num - update sync state and send a catchup request
+	// 4  my head block num > peer block num ssend a notice catchup if this is not the first generation
+	//
+	//-----------------------------
+
 	var cc ChainController
-	//lib_num := cc.last_irreversible_block_num()
-	//peer_lib := msg.last_irreversible_block_num
+	my_lib_num := cc.last_irreversible_block_num()
+	peer_lib_num := msg.last_irreversible_block_num
 
 	peer.syncing = false
-	head_num := cc.head_block_num()
+	head_num := (uint32)(cc.head_block_num())
 	head_id := cc.head_block_id()
 	if head_id == msg.head_id {
+		peer.EnqueueMsg(&NoticeMsg{})
+		return
 	}
-	if head_num < 0 {
+
+	if head_num < peer_lib_num {
+		this.start_sync(peer, peer_lib_num)
+		return
 	}
-	if msg.head_num < 100 {
+	if msg.head_num < my_lib_num {
+		if msg.generation > 1 {
+			peer.EnqueueMsg(&NoticeMsg{})
+		}
+		peer.syncing = true
+		return
 	}
 	if head_num <= msg.head_num {
 		return
 	}
 	if msg.generation > 1 {
-		/*var NoticeMsg note
-		peer.enqueue(note)*/
+		peer.EnqueueMsg(&NoticeMsg{})
 	}
 	peer.syncing = true
+}
+
+func (this *SyncManager) start_sync(peer *Peer, target uint32) {
 }
 
 func (this *SyncManager) is_active(peer *Peer) bool {
